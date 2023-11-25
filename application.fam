@@ -1,0 +1,15 @@
+App(
+    appid="dvd_logo",
+    name="DVD Logo",
+    apptype=FlipperAppType.EXTERNAL,
+    entry_point="dvd_logo_app",
+    requires=[
+        "gui",
+    ],
+    stack_size=1 * 1024,
+    targets=["f7"],
+    fap_version="0.1",
+    fap_icon="dvd_logo.png",
+    fap_category="Misc",
+    fap_icon_assets="images",
+)
