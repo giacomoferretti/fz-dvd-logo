@@ -168,10 +168,10 @@ int32_t dvd_logo_app(void* p) {
 
     // Init state
     DvdLogoState* dvd_logo_state = malloc(sizeof(DvdLogoState));
-    dvd_logo_state->position.x = 0; //rand() % MAX_WIDTH;
-    dvd_logo_state->position.y = 0; //rand() % MAX_HEIGHT;
-    dvd_logo_state->stepX = -1; //rand() % MAX_WIDTH;
-    dvd_logo_state->stepY = -1; //rand() % MAX_HEIGHT;
+    dvd_logo_state->position.x = rand() % MAX_WIDTH;
+    dvd_logo_state->position.y = rand() % MAX_HEIGHT;
+    dvd_logo_state->stepX = (rand() % 2) ? 1 : -1;
+    dvd_logo_state->stepY = (rand() % 2) ? 1 : -1;
     dvd_logo_state->notifications = furi_record_open(RECORD_NOTIFICATION);
     dvd_logo_bounce(dvd_logo_state);
 
