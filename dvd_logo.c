@@ -30,29 +30,35 @@ typedef struct {
 
 typedef struct {
     Point position;
-    uint8_t stepX;
-    uint8_t stepY;
+    Point step;
+    int speed;
 
-    NotificationApp* notifications;
+    NotificationApp* notification;
     FuriMutex* mutex;
 } DvdLogoState;
 
 static void dvd_logo_render_callback(Canvas* const canvas, void* ctx) {
     DvdLogoState* dvd_logo_state = ctx;
 
+    furi_mutex_acquire(dvd_logo_state->mutex, FuriWaitForever);
+
     canvas_draw_icon(
         canvas, dvd_logo_state->position.x, dvd_logo_state->position.y, &I_DvdLogo_46x26);
+
+    furi_mutex_release(dvd_logo_state->mutex);
 }
 
-static void dvd_logo_input_callback(InputEvent* input_event, FuriMessageQueue* event_queue) {
-    furi_assert(event_queue);
+static void dvd_logo_input_callback(InputEvent* input_event, void* context) {
+    furi_assert(context);
+    FuriMessageQueue* event_queue = context;
 
     DvdLogoEvent event = {.type = EventTypeKey, .input = *input_event};
     furi_message_queue_put(event_queue, &event, FuriWaitForever);
 }
 
-static void dvd_logo_update_timer_callback(FuriMessageQueue* event_queue) {
-    furi_assert(event_queue);
+static void dvd_logo_update_timer_callback(void* context) {
+    furi_assert(context);
+    FuriMessageQueue* event_queue = context;
 
     DvdLogoEvent event = {.type = EventTypeTick};
     furi_message_queue_put(event_queue, &event, 0);
@@ -61,88 +67,61 @@ static void dvd_logo_update_timer_callback(FuriMessageQueue* event_queue) {
 static Point dvd_logo_get_next_step(DvdLogoState* dvd_logo_state) {
     Point next_step = dvd_logo_state->position;
 
-    next_step.x += dvd_logo_state->stepX;
-    next_step.y += dvd_logo_state->stepY;
+    next_step.x += dvd_logo_state->step.x * dvd_logo_state->speed;
+    next_step.y += dvd_logo_state->step.y * dvd_logo_state->speed;
 
     return next_step;
 }
 
-int rand_int(int min, int max) {
-    return min + rand() % (max - min);
-}
+const NotificationSequence sequence_corner = {
+    // &message_vibro_on,
+    &message_note_c5,
+    &message_delay_50,
+    &message_sound_off,
+    // &message_vibro_off,
+    NULL,
+};
 
-// Static list of frequencies
-// static const float frequencies[] = {
-//     261.63f, // C4
-//     // 293.66f, // D4
-//     // 329.63f, // E4
-//     // 349.23f, // F4
-//     // 392.00f, // G4
-//     // 440.00f, // A4
-//     // 493.88f, // B4
-//     523.25f, // C5
-//     // 587.33f, // D5
-//     // 659.25f, // E5
-//     // 698.46f, // F5
-//     // 783.99f, // G5
-//     // 880.00f, // A5
-//     // 987.77f, // B5
-//     // 1046.50f, // C6
-// };
+const NotificationSequence sequence_wall = {
+    // &message_vibro_on,
+    &message_note_c4,
+    &message_delay_50,
+    &message_sound_off,
+    // &message_vibro_off,
+    NULL,
+};
 
 static void dvd_logo_bounce_sfx(DvdLogoState* dvd_logo_state, bool is_corner) {
     if(is_corner) {
-        notification_message(dvd_logo_state->notifications, &sequence_set_only_green_255);
+        notification_message(dvd_logo_state->notification, &sequence_set_only_green_255);
+        notification_message(dvd_logo_state->notification, &sequence_corner);
     } else {
-        notification_message(dvd_logo_state->notifications, &sequence_set_only_blue_255);
+        notification_message(dvd_logo_state->notification, &sequence_set_only_blue_255);
+        notification_message(dvd_logo_state->notification, &sequence_wall);
     }
-    // notification_message(dvd_logo_state->notifications, &sequence_set_vibro_on);
-
-    if(furi_hal_speaker_acquire(1000)) {
-        // Play random frequency
-        // furi_hal_speaker_start(frequencies[rand() % (sizeof(frequencies) / sizeof(float))], 1.0f);
-        if(is_corner) {
-            furi_hal_speaker_start(523.25f, 1.0f);
-        } else {
-            furi_hal_speaker_start(261.63f, 1.0f);
-        }
-    }
-
-    furi_delay_ms(50);
-
-    if(furi_hal_speaker_is_mine()) {
-        furi_hal_speaker_stop();
-        furi_hal_speaker_release();
-    }
-
-    // notification_message(dvd_logo_state->notifications, &sequence_reset_vibro);
-    notification_message(dvd_logo_state->notifications, &sequence_reset_rgb);
+    notification_message(dvd_logo_state->notification, &sequence_reset_rgb);
 }
 
 static void dvd_logo_bounce(DvdLogoState* dvd_logo_state) {
     bool has_bounced = false;
 
-    if(dvd_logo_state->position.x == MAX_WIDTH) {
-        dvd_logo_state->stepX = -1;
+    if(dvd_logo_state->position.x >= MAX_WIDTH) {
+        dvd_logo_state->step.x = -1; // Invert step
+        dvd_logo_state->position.x = MAX_WIDTH; // Cap position
         has_bounced = true;
-    } else if(dvd_logo_state->position.x == 0) {
-        dvd_logo_state->stepX = 1;
-        has_bounced = true;
-    }
-
-    if(dvd_logo_state->position.y == MAX_HEIGHT) {
-        dvd_logo_state->stepY = -1;
-        has_bounced = true;
-    } else if(dvd_logo_state->position.y == 0) {
-        dvd_logo_state->stepY = 1;
+    } else if(dvd_logo_state->position.x <= 0) {
+        dvd_logo_state->step.x = 1; // Invert step
+        dvd_logo_state->position.x = 0; // Cap position
         has_bounced = true;
     }
 
-    if(dvd_logo_state->position.x == MAX_WIDTH) {
-        dvd_logo_state->stepX = -1;
+    if(dvd_logo_state->position.y >= MAX_HEIGHT) {
+        dvd_logo_state->step.y = -1; // Invert step
+        dvd_logo_state->position.y = MAX_HEIGHT; // Cap position
         has_bounced = true;
-    } else if(dvd_logo_state->position.x == 0) {
-        dvd_logo_state->stepX = 1;
+    } else if(dvd_logo_state->position.y <= 0) {
+        dvd_logo_state->step.y = 1; // Invert step
+        dvd_logo_state->position.y = 0; // Cap position
         has_bounced = true;
     }
 
@@ -160,19 +139,31 @@ static void dvd_logo_process_step(DvdLogoState* dvd_logo_state) {
     dvd_logo_bounce(dvd_logo_state);
 }
 
+static void dvd_logo_init_state(DvdLogoState* const dvd_logo_state) {
+    dvd_logo_state->position.x = rand() % MAX_WIDTH;
+    dvd_logo_state->position.y = rand() % MAX_HEIGHT;
+    dvd_logo_state->step.x = (rand() % 2) ? 1 : -1;
+    dvd_logo_state->step.y = (rand() % 2) ? 1 : -1;
+    dvd_logo_state->speed = 2;
+}
+
 int32_t dvd_logo_app(void* p) {
     UNUSED(p);
 
     // Init event queue
     FuriMessageQueue* event_queue = furi_message_queue_alloc(8, sizeof(DvdLogoEvent));
 
+    // Enforce display on
+    NotificationApp* notification = furi_record_open(RECORD_NOTIFICATION);
+    notification_message_block(notification, &sequence_display_backlight_enforce_on);
+
     // Init state
     DvdLogoState* dvd_logo_state = malloc(sizeof(DvdLogoState));
-    dvd_logo_state->position.x = rand() % MAX_WIDTH;
-    dvd_logo_state->position.y = rand() % MAX_HEIGHT;
-    dvd_logo_state->stepX = (rand() % 2) ? 1 : -1;
-    dvd_logo_state->stepY = (rand() % 2) ? 1 : -1;
-    dvd_logo_state->notifications = furi_record_open(RECORD_NOTIFICATION);
+    dvd_logo_init_state(dvd_logo_state);
+    dvd_logo_state->mutex = furi_mutex_alloc(FuriMutexTypeNormal);
+    dvd_logo_state->notification = notification;
+
+    // Check for first bounce
     dvd_logo_bounce(dvd_logo_state);
 
     // Init view
@@ -195,6 +186,8 @@ int32_t dvd_logo_app(void* p) {
     for(bool processing = true; processing;) {
         FuriStatus event_status = furi_message_queue_get(event_queue, &event, 100);
 
+        furi_mutex_release(dvd_logo_state->mutex);
+
         if(event_status == FuriStatusOk) {
             if(event.type == EventTypeKey) {
                 if(event.input.type == InputTypePress && event.input.key == InputKeyBack) {
@@ -207,8 +200,12 @@ int32_t dvd_logo_app(void* p) {
             // Event timeout
         }
 
+        furi_mutex_release(dvd_logo_state->mutex);
         view_port_update(view_port);
     }
+
+    // Return backlight to normal state
+    notification_message(notification, &sequence_display_backlight_enforce_auto);
 
     // Cleanup
     furi_timer_free(timer);
@@ -218,6 +215,7 @@ int32_t dvd_logo_app(void* p) {
     view_port_free(view_port);
     furi_message_queue_free(event_queue);
     furi_record_close(RECORD_NOTIFICATION);
+    furi_mutex_free(dvd_logo_state->mutex);
     free(dvd_logo_state);
 
     return 0;
